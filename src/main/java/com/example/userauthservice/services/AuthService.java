@@ -32,7 +32,6 @@ public class AuthService implements IAuthService {
     private BCryptPasswordEncoder bCryptPasswordEncoder;
 
     @Override
-    // Since the actua
     public User signup(String name, String email, String password, String phoneNumber) {
         if (userRepo.findByEmail(email).isPresent()) {
             throw new UserAlreadySignedUpException("Please login directly");
