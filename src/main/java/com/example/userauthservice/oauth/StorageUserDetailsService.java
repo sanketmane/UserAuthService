@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import java.util.Optional;
 
 // This service will get the user details from db
+// This is used to support user credential validation for oauth service using Spring auth server
 @Service
 public class StorageUserDetailsService implements UserDetailsService  {
 
