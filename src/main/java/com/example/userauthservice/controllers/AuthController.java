@@ -4,9 +4,9 @@ import com.example.userauthservice.dtos.LoginRequestDto;
 import com.example.userauthservice.dtos.SignUpRequestDto;
 import com.example.userauthservice.dtos.UserDto;
 import com.example.userauthservice.dtos.ValidateTokenRequestDto;
+import com.example.userauthservice.exceptions.UnauthorizedException;
 import com.example.userauthservice.models.User;
 import com.example.userauthservice.services.IAuthService;
-import org.antlr.v4.runtime.misc.MultiMap;
 import org.antlr.v4.runtime.misc.Pair;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -14,10 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/auth")
@@ -55,8 +52,18 @@ public class AuthController {
         return new ResponseEntity<UserDto>(userDto, headers, HttpStatus.OK);
     }
 
+    @PostMapping("/validateToken")
     public Boolean validateToken(@RequestBody ValidateTokenRequestDto validateTokenRequestDto) {
-        return null;
+
+        Boolean tokenStatus = authService.validateToken(
+                validateTokenRequestDto.getToken(),
+                validateTokenRequestDto.getUserId());
+
+        if(!tokenStatus){
+            throw new UnauthorizedException("Please login again!");
+        }
+
+        return tokenStatus;
     }
 
     // pending logout and forgotPassword implementation

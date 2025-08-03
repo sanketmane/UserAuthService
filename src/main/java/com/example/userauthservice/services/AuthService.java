@@ -3,8 +3,13 @@ package com.example.userauthservice.services;
 import com.example.userauthservice.exceptions.PasswordMismatchException;
 import com.example.userauthservice.exceptions.UserAlreadySignedUpException;
 import com.example.userauthservice.exceptions.UserNotRegisteredException;
+import com.example.userauthservice.models.Status;
 import com.example.userauthservice.models.User;
+import com.example.userauthservice.models.UserSession;
+import com.example.userauthservice.repos.SessionRepo;
 import com.example.userauthservice.repos.UserRepo;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.MacAlgorithm;
 import org.antlr.v4.runtime.misc.Pair;
@@ -22,6 +27,12 @@ public class AuthService implements IAuthService {
 
     @Autowired
     private UserRepo userRepo;
+
+    @Autowired
+    private SessionRepo sessionRepo;
+
+    @Autowired
+    private SecretKey secretKey;
 
     // BCryptPasswordEncoder needs spring-boot-starter-security dependency installed in pom.xml
     // By default, when you Autowire BCryptPasswordEncoder object below, IntelliJ will complain
@@ -87,19 +98,50 @@ public class AuthService implements IAuthService {
         claims.put("gen", currentTimeMillis);
         claims.put("exp", currentTimeMillis+3600); // expiration = current time + 1hr
 
-        MacAlgorithm algorithm = Jwts.SIG.HS256; // Hashing algo
-        SecretKey secretKey = algorithm.key().build(); // Secret
+//        MacAlgorithm algorithm = Jwts.SIG.HS256; // Hashing algo
+//        SecretKey secretKey = algorithm.key().build(); // Secret
 
         // Since we have all 3 items i.e. Hashing algo+Payload+Secret
         // lets build the token now
         String token = Jwts.builder().claims(claims).signWith(secretKey).compact();
+        UserSession userSession = new UserSession();
+        userSession.setToken(token);
+        userSession.setUser(user);
+        userSession.setStatus(Status.ACTIVE);
+        sessionRepo.save(userSession);
+
         return new Pair<User,String>(user, token); // we want to return both user, token in same object
     }
 
     @Override
     //pending implementation
     public Boolean validateToken(String token, Long userId) {
-        return null;
+        Optional<UserSession> optionalUserSession = sessionRepo.findByTokenAndUserId(token, userId);
+        if(optionalUserSession.isEmpty()){
+            return false;
+        }
+
+        // We will do reverse engineering here
+        // From secret, we will try to find out the payload
+        // We will also check if the existing token is valid or expired
+        JwtParser jwtParser = Jwts.parser().verifyWith(secretKey).build(); // build the jwt parser
+        Claims claims = jwtParser.parseSignedClaims(token).getPayload(); // get the payload using the parser
+
+        Long tokenExpiresIn = (Long) claims.get("exp"); // get the token expiry time
+        Long currentTime = System.currentTimeMillis(); // get the current time
+
+        // validate if the token is valid or expired
+        // if expired, update the session info to mark the token as inactive in db.
+        // and return the status as false, otherwise return true
+        if(tokenExpiresIn > currentTime){
+            System.out.println("token expired");
+            UserSession userSession = optionalUserSession.get();
+            userSession.setStatus(Status.INACTIVE);
+            sessionRepo.save(userSession);
+            return false;
+        }
+        return true;
+
     }
 
 }
