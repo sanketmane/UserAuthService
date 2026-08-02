@@ -81,11 +81,12 @@ public class SecurityConfig {
     public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http)
             throws Exception {
         http
+                .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests((authorize) -> authorize
+                        .requestMatchers("/api/auth/signup", "/api/auth/login",
+                                "/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
                         .anyRequest().authenticated()
                 )
-                // Form login handles the redirect to the login page from the
-                // authorization server filter chain
                 .formLogin(Customizer.withDefaults());
 
         return http.build();
