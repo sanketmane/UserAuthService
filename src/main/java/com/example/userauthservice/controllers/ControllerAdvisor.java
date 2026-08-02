@@ -1,6 +1,8 @@
 package com.example.userauthservice.controllers;
 
+import com.example.userauthservice.exceptions.InvalidTokenException;
 import com.example.userauthservice.exceptions.PasswordMismatchException;
+import com.example.userauthservice.exceptions.UnauthorizedException;
 import com.example.userauthservice.exceptions.UserAlreadySignedUpException;
 import com.example.userauthservice.exceptions.UserNotRegisteredException;
 import org.springframework.http.HttpStatus;
@@ -15,8 +17,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class ControllerAdvisor {
     @ExceptionHandler({UserAlreadySignedUpException.class,
                        UserNotRegisteredException.class,
-                       PasswordMismatchException.class})
+                       PasswordMismatchException.class,
+                       InvalidTokenException.class})
     public ResponseEntity<String> handleExceptions(Exception exception){
         return new ResponseEntity<>(exception.getMessage(), HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<String> handleUnauthorized(UnauthorizedException exception){
+        return new ResponseEntity<>(exception.getMessage(), HttpStatus.UNAUTHORIZED);
     }
 }

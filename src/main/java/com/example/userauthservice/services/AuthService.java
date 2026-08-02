@@ -1,26 +1,38 @@
 package com.example.userauthservice.services;
 
+import com.example.userauthservice.clients.KafkaClient;
+import com.example.userauthservice.dtos.EmailDto;
+import com.example.userauthservice.exceptions.InvalidTokenException;
 import com.example.userauthservice.exceptions.PasswordMismatchException;
+import com.example.userauthservice.exceptions.UnauthorizedException;
 import com.example.userauthservice.exceptions.UserAlreadySignedUpException;
 import com.example.userauthservice.exceptions.UserNotRegisteredException;
+import com.example.userauthservice.models.PasswordResetToken;
 import com.example.userauthservice.models.Status;
 import com.example.userauthservice.models.User;
 import com.example.userauthservice.models.UserSession;
+import com.example.userauthservice.repos.PasswordResetTokenRepo;
 import com.example.userauthservice.repos.SessionRepo;
 import com.example.userauthservice.repos.UserRepo;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.MacAlgorithm;
 import org.antlr.v4.runtime.misc.Pair;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class AuthService implements IAuthService {
@@ -34,6 +46,17 @@ public class AuthService implements IAuthService {
     @Autowired
     private SecretKey secretKey;
 
+    // visible for testing
+    public void setSecretKey(SecretKey secretKey) {
+        this.secretKey = secretKey;
+    }
+
+    @Autowired
+    private KafkaClient kafkaClient;
+
+    @Autowired
+    private PasswordResetTokenRepo passwordResetTokenRepo;
+
     // BCryptPasswordEncoder needs spring-boot-starter-security dependency installed in pom.xml
     // By default, when you Autowire BCryptPasswordEncoder object below, IntelliJ will complain
     // This is because the dependency for it for some reason isn't being satisfied.
@@ -41,6 +64,9 @@ public class AuthService implements IAuthService {
     // "SecurityConfig" created in a "config" package.
     @Autowired
     private BCryptPasswordEncoder bCryptPasswordEncoder;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Override
     public User signup(String name, String email, String password, String phoneNumber) {
@@ -53,7 +79,20 @@ public class AuthService implements IAuthService {
         user.setPassword(bCryptPasswordEncoder.encode(password)); // save encrypted password in DB.
         user.setName(name);
         user.setPhoneNumber(phoneNumber);
+
+        // send message via kafka to EmailService
+        try {
+            EmailDto emailDto = new EmailDto();
+            emailDto.setFrom("anuragonhiring@gmail.com");
+            emailDto.setTo(email);
+            emailDto.setSubject("Welcome!");
+            emailDto.setBody("Have a nice day!");
+            kafkaClient.sendMessage("signup", objectMapper.writeValueAsString(emailDto));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e.getMessage());
+        }
         return userRepo.save(user);
+
     }
 
     @Override
@@ -133,7 +172,7 @@ public class AuthService implements IAuthService {
         // validate if the token is valid or expired
         // if expired, update the session info to mark the token as inactive in db.
         // and return the status as false, otherwise return true
-        if(tokenExpiresIn > currentTime){
+        if(tokenExpiresIn < currentTime){
             System.out.println("token expired");
             UserSession userSession = optionalUserSession.get();
             userSession.setStatus(Status.INACTIVE);
@@ -142,6 +181,74 @@ public class AuthService implements IAuthService {
         }
         return true;
 
+    }
+
+    @Override
+    public User getProfile(Long userId, String token) {
+        if (!validateToken(token, userId)) {
+            throw new UnauthorizedException("Please login again!");
+        }
+        return userRepo.findById(userId)
+                .orElseThrow(() -> new UserNotRegisteredException("User not found."));
+    }
+
+    @Override
+    public User updateProfile(Long userId, String token, String name, String phoneNumber) {
+        if (!validateToken(token, userId)) {
+            throw new UnauthorizedException("Please login again!");
+        }
+        User user = userRepo.findById(userId)
+                .orElseThrow(() -> new UserNotRegisteredException("User not found."));
+        if (name != null && !name.isBlank()) user.setName(name);
+        if (phoneNumber != null && !phoneNumber.isBlank()) user.setPhoneNumber(phoneNumber);
+        return userRepo.save(user);
+    }
+
+    @Override
+    public void forgotPassword(String email) {
+        Optional<User> userOptional = userRepo.findByEmail(email);
+        if (userOptional.isEmpty()) {
+            throw new UserNotRegisteredException("No account found for this email.");
+        }
+        User user = userOptional.get();
+
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setToken(UUID.randomUUID().toString());
+        resetToken.setUser(user);
+        resetToken.setExpiresAt(new Date(System.currentTimeMillis() + 15 * 60 * 1000));
+        resetToken.setUsed(false);
+        passwordResetTokenRepo.save(resetToken);
+
+        try {
+            EmailDto emailDto = new EmailDto();
+            emailDto.setFrom("sanket.mane@gmail.com");
+            emailDto.setTo(email);
+            emailDto.setSubject("Password Reset Request");
+            emailDto.setBody("Click to reset your password: http://localhost:3000/reset-password?token=" + resetToken.getToken());
+            kafkaClient.sendMessage("password-reset", objectMapper.writeValueAsString(emailDto));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e.getMessage());
+        }
+    }
+
+    @Override
+    public void resetPassword(String token, String newPassword) {
+        Optional<PasswordResetToken> tokenOptional = passwordResetTokenRepo.findByToken(token);
+        if (tokenOptional.isEmpty()) {
+            throw new InvalidTokenException("Invalid password reset token.");
+        }
+        PasswordResetToken resetToken = tokenOptional.get();
+        if (resetToken.isUsed()) {
+            throw new InvalidTokenException("Password reset token has already been used.");
+        }
+        if (resetToken.getExpiresAt().before(new Date())) {
+            throw new InvalidTokenException("Password reset token has expired.");
+        }
+        User user = resetToken.getUser();
+        user.setPassword(bCryptPasswordEncoder.encode(newPassword));
+        userRepo.save(user);
+        resetToken.setUsed(true);
+        passwordResetTokenRepo.save(resetToken);
     }
 
 }

@@ -1,7 +1,10 @@
 package com.example.userauthservice.controllers;
 
+import com.example.userauthservice.dtos.ForgotPasswordRequestDto;
 import com.example.userauthservice.dtos.LoginRequestDto;
+import com.example.userauthservice.dtos.ResetPasswordRequestDto;
 import com.example.userauthservice.dtos.SignUpRequestDto;
+import com.example.userauthservice.dtos.UpdateProfileRequestDto;
 import com.example.userauthservice.dtos.UserDto;
 import com.example.userauthservice.dtos.ValidateTokenRequestDto;
 import com.example.userauthservice.exceptions.UnauthorizedException;
@@ -17,7 +20,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
 public class AuthController {
 
     @Autowired
@@ -66,13 +69,42 @@ public class AuthController {
         return tokenStatus;
     }
 
-    // pending logout and forgotPassword implementation
+
+    @GetMapping("/profile/{userId}")
+    public ResponseEntity<UserDto> getProfile(
+            @PathVariable Long userId,
+            @RequestHeader("token") String token) {
+        User user = authService.getProfile(userId, token);
+        return ResponseEntity.ok(from(user));
+    }
+
+    @PutMapping("/profile/{userId}")
+    public ResponseEntity<UserDto> updateProfile(
+            @PathVariable Long userId,
+            @RequestHeader("token") String token,
+            @RequestBody UpdateProfileRequestDto updateDto) {
+        User user = authService.updateProfile(userId, token, updateDto.getName(), updateDto.getPhoneNumber());
+        return ResponseEntity.ok(from(user));
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Void> forgotPassword(@RequestBody ForgotPasswordRequestDto forgotDto) {
+        authService.forgotPassword(forgotDto.getEmail());
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@RequestBody ResetPasswordRequestDto resetDto) {
+        authService.resetPassword(resetDto.getToken(), resetDto.getNewPassword());
+        return ResponseEntity.ok().build();
+    }
 
     private UserDto from(User user) {
         UserDto userDto = new UserDto();
         userDto.setId(user.getId());
         userDto.setEmail(user.getEmail());
         userDto.setUsername(user.getName());
+        userDto.setPhoneNumber(user.getPhoneNumber());
         return userDto;
     }
 }
