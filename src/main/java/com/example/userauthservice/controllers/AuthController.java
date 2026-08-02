@@ -69,7 +69,6 @@ public class AuthController {
         return tokenStatus;
     }
 
-    // pending logout and forgotPassword implementation
 
     @GetMapping("/profile/{userId}")
     public ResponseEntity<UserDto> getProfile(
